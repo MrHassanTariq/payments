@@ -14,9 +14,9 @@ import { PaymentModule } from './payment';
     // Database connection
     DatabaseModule,
     
-    // Payment module - provider is selected via PAYMENT_PROVIDER env var
-    // Change this single value to switch providers (stripe, paypal, airwallex)
-    PaymentModule.forRoot(),
+    // Payment module
+    // Provider is selected via PAYMENT_PROVIDER env var (stripe, paypal, airwallex)
+    PaymentModule,
   ],
 })
 export class AppModule {}

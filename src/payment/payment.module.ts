@@ -1,8 +1,8 @@
-import { Module, DynamicModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
-import { PAYMENT_PROVIDER } from './interfaces/payment-provider.interface';
+import { PAYMENT_PROVIDER, IPaymentProvider } from './interfaces/payment-provider.interface';
 import { StripeProvider } from './providers/stripe.provider';
 import { PayPalProvider } from './providers/paypal.provider';
 import { AirwallexProvider } from './providers/airwallex.provider';
@@ -10,83 +10,44 @@ import { AirwallexProvider } from './providers/airwallex.provider';
 /**
  * Payment Module
  * 
- * This module wires everything together. The key design principle:
- * - PaymentService depends on IPaymentProvider (interface)
- * - The actual provider is selected at runtime via configuration
- * - No business logic changes needed when switching providers
+ * HOW PROVIDER SWITCHING WORKS:
  * 
- * To add a new provider:
- * 1. Create a new provider class implementing IPaymentProvider
- * 2. Add it to the providerMap below
- * 3. Update your environment variable
- * 
- * That's it! No changes to PaymentService, controllers, or other business logic.
+ * 1. Set PAYMENT_PROVIDER env variable (stripe, paypal, or airwallex)
+ * 2. The factory below reads that value and creates the right provider
+ * 3. PaymentService receives whichever provider was created
+ * 4. PaymentService doesn't know or care which one it is
  */
-
-// Map of available providers
-const providerMap = {
-  stripe: StripeProvider,
-  paypal: PayPalProvider,
-  airwallex: AirwallexProvider,
-};
-
-type ProviderName = keyof typeof providerMap;
-
-@Module({})
-export class PaymentModule {
-  /**
-   * Configure the payment module with a specific provider
-   * 
-   * Usage in AppModule:
-   * PaymentModule.forRoot() - Uses PAYMENT_PROVIDER env variable
-   * PaymentModule.forRoot('stripe') - Explicitly use Stripe
-   */
-  static forRoot(providerName?: ProviderName): DynamicModule {
-    return {
-      module: PaymentModule,
-      controllers: [PaymentController],
-      providers: [
-        PaymentService,
-        // All providers are available for DI
-        StripeProvider,
-        PayPalProvider,
-        AirwallexProvider,
-        // Factory that selects the active provider
-        {
-          provide: PAYMENT_PROVIDER,
-          useFactory: (
-            configService: ConfigService,
-            stripe: StripeProvider,
-            paypal: PayPalProvider,
-            airwallex: AirwallexProvider,
-          ) => {
-            // Use explicit provider name or get from config
-            const selectedProvider = providerName || 
-              configService.get<string>('PAYMENT_PROVIDER') || 
-              'stripe';
-
-            const providers = {
-              stripe,
-              paypal,
-              airwallex,
-            };
-
-            const provider = providers[selectedProvider as ProviderName];
-            
-            if (!provider) {
-              throw new Error(
-                `Unknown payment provider: ${selectedProvider}. ` +
-                `Available providers: ${Object.keys(providers).join(', ')}`
-              );
-            }
-
-            console.log(`✅ Payment provider initialized: ${selectedProvider}`);
-            return provider;
-          },
-          inject: [ConfigService, StripeProvider, PayPalProvider, AirwallexProvider],
-        },
-      ],
-      exports: [PaymentService, PAYMENT_PROVIDER],
-    };
-  }
-}
+@Module({
+  controllers: [PaymentController],
+  providers: [
+    PaymentService,
+    
+    // This is where the magic happens:
+    // We tell NestJS "when someone asks for PAYMENT_PROVIDER, run this factory"
+    {
+      provide: PAYMENT_PROVIDER,
+      useFactory: (config: ConfigService): IPaymentProvider => {
+        // Step 1: Read which provider to use from environment
+        const providerName = config.get<string>('PAYMENT_PROVIDER') || 'stripe';
+        
+        // Step 2: Create and return the appropriate provider
+        switch (providerName) {
+          case 'stripe':
+            return new StripeProvider(config);
+          
+          case 'paypal':
+            return new PayPalProvider(config);
+          
+          case 'airwallex':
+            return new AirwallexProvider(config);
+          
+          default:
+            throw new Error(`Unknown provider: ${providerName}. Use: stripe, paypal, or airwallex`);
+        }
+      },
+      inject: [ConfigService], // Factory needs ConfigService to read env vars
+    },
+  ],
+  exports: [PaymentService],
+})
+export class PaymentModule {}
